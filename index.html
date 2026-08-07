@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
 <title>PLU ARMY</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -629,6 +629,22 @@ function enterFeed(){
   document.getElementById('header-stats').style.display = 'flex';
   setupPresence();
   loadPosts();
+  setupUnreadDismissal();
+}
+
+// Dismiss the "New messages" badge as soon as the user taps a message or
+// starts scrolling the chat — they're clearly looking at it now, no need
+// to wait for the divider itself to scroll into view.
+function setupUnreadDismissal(){
+  const list = document.getElementById('posts-list');
+  const dismiss = () => {
+    if(unreadDismissed) return;
+    unreadDismissed = true;
+    document.getElementById('stat-unread-pill').style.display = 'none';
+  };
+  list.addEventListener('scroll', dismiss, { passive: true });
+  list.addEventListener('touchstart', dismiss, { passive: true });
+  list.addEventListener('click', dismiss);
 }
 
 // ====== MEDIA ======
@@ -1046,7 +1062,7 @@ function renderPost(p, byId){
   const sendingTag = p._sending ? `<span style="opacity:0.6;font-size:10px;">Sending…</span>` : `${editedTag}<span class="time">${time}</span>`;
 
   return `
-  <div class="bubble-row ${isMine ? 'mine' : ''}" ${p._sending ? `data-temp-id="${p.id}"` : ''}>
+  <div class="bubble-row ${isMine ? 'mine' : ''}" data-post-id="${p.id}" ${p._sending ? `data-temp-id="${p.id}"` : ''}>
     <span class="swipe-hint">↩️</span>
     <div class="bubble-wrap" style="${p._sending ? 'opacity:0.75;' : ''}">
       ${!isMine ? `<div class="avatar-sm" ${avatarClickAttr}>${avatarInner}</div>` : ''}
@@ -1056,7 +1072,7 @@ function renderPost(p, byId){
         <div class="content">${body}</div>
         <div class="meta-row">
           <div class="bubble-actions">
-            ${!p._sending ? `<button class="${likedByMe ? 'liked' : ''}" onclick="toggleLike('${p.id}', ${likedByMe})">${likedByMe ? '❤️' : '🤍'} ${likeCount}</button>
+            ${!p._sending ? `<button class="like-btn ${likedByMe ? 'liked' : ''}" onclick="toggleLike('${p.id}', ${likedByMe})">${likedByMe ? '❤️' : '🤍'} ${likeCount}</button>
             <button onclick="reportPost('${p.id}')">🚩</button>` : ''}
           </div>
           ${sendingTag}
@@ -1094,8 +1110,34 @@ function escapeHtml(str){
 function setupRealtime(){
   sb.channel('public:posts')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => loadPosts())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'likes' }, () => loadPosts())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'likes' }, (payload) => handleLikeChange(payload))
     .subscribe();
+}
+
+// Patches just the one heart icon that changed, instead of rebuilding the
+// whole message list. This is what actually stops the scroll jump — a full
+// rebuild was always fragile (it depended on browser scroll-position
+// quirks), whereas patching one element in place can never move the scroll
+// position at all.
+async function handleLikeChange(payload){
+  const postId = payload.new?.post_id || payload.old?.post_id;
+  if(!postId) return;
+
+  const { data: likes } = await sb.from('likes').select('user_id').eq('post_id', postId);
+  const likedByMe = (likes || []).some(l => l.user_id === currentUser.id);
+  const likeCount = (likes || []).length;
+
+  // Keep the cached copy in sync too, so later full reloads (new messages,
+  // replies, etc.) still show the correct like state for this post.
+  if(lastById[postId]) lastById[postId].likes = likes || [];
+
+  const row = document.querySelector(`.bubble-row[data-post-id="${postId}"]`);
+  if(!row) return; // not currently visible (e.g. hidden for this user) — nothing to patch
+  const likeBtn = row.querySelector('.like-btn');
+  if(!likeBtn) return;
+  likeBtn.className = 'like-btn' + (likedByMe ? ' liked' : '');
+  likeBtn.innerHTML = `${likedByMe ? '❤️' : '🤍'} ${likeCount}`;
+  likeBtn.setAttribute('onclick', `toggleLike('${postId}', ${likedByMe})`);
 }
 
 // ====== ONLINE PRESENCE ======
@@ -1113,6 +1155,21 @@ function setupPresence(){
       await channel.track({ user_id: currentUser.id, name: currentUser.name });
     }
   });
+}
+
+// ====== KEEP HEADER VISIBLE WHEN THE KEYBOARD OPENS ======
+// On some phones (notably iPhone), opening the on-screen keyboard scrolls
+// the whole page up to keep the text box visible — which pushes our fixed
+// header off the top of the screen. This keeps the app's actual height
+// matched to the real visible area, so the header never gets pushed away.
+if(window.visualViewport){
+  const fitToVisibleArea = () => {
+    document.body.style.height = window.visualViewport.height + 'px';
+    window.scrollTo(0, 0);
+  };
+  window.visualViewport.addEventListener('resize', fitToVisibleArea);
+  window.visualViewport.addEventListener('scroll', fitToVisibleArea);
+  fitToVisibleArea();
 }
 
 // ====== INIT ======
