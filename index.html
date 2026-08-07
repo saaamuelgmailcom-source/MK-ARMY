@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PLU ARMY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --plu-yellow:#FFD100;
+    --plu-black:#141414;
+    --plu-maroon:#9C1B3D;
+    --plu-olive:#4B5320;
+    --plu-cream:#FFF8E1;
+    --plu-gray:#6b6b6b;
+    --chat-bg:#EDE3C8;
+    font-family:'Inter',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{background:var(--plu-cream);color:var(--plu-black);overflow:hidden;}
+
+  /* HEADER */
+  header{
+    background:var(--plu-black);
+    color:var(--plu-yellow);
+    padding:12px 18px;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    border-bottom:4px solid var(--plu-yellow);
+    flex-shrink:0;
+  }
+  header .logo-mark{
+    width:36px;height:36px;border-radius:50%;
+    background:var(--plu-yellow);
+    display:flex;align-items:center;justify-content:center;
+    font-family:'Archivo Black',sans-serif;
+    color:var(--plu-black);
+    font-size:13px;
+  }
+  header h1{
+    font-family:'Archivo Black',sans-serif;
+    font-size:17px;
+    letter-spacing:0.5px;
+  }
+  header span.tag{
+    font-size:11px;color:var(--plu-cream);opacity:0.7;display:block;font-weight:400;
+  }
+
+  /* AUTH SCREEN */
+  #auth-screen{
+    max-width:420px;margin:40px auto;padding:0 20px;
+  }
+  .card{
+    background:white;border-radius:14px;padding:28px 24px;
+    box-shadow:0 2px 14px rgba(0,0,0,0.08);
+    border-top:6px solid var(--plu-maroon);
+  }
+  .card h2{
+    font-family:'Archivo Black',sans-serif;
+    font-size:20px;margin-bottom:6px;
+  }
+  .card p.sub{color:var(--plu-gray);font-size:13px;margin-bottom:20px;}
+  label{display:block;font-size:12px;font-weight:600;margin:14px 0 6px;color:var(--plu-black);}
+  input{
+    width:100%;padding:11px 12px;border:1.5px solid #ddd;border-radius:8px;
+    font-size:14px;font-family:'Inter',sans-serif;
+  }
+  input:focus{outline:none;border-color:var(--plu-maroon);}
+  button.primary{
+    width:100%;margin-top:20px;padding:13px;
+    background:var(--plu-maroon);color:white;border:none;border-radius:8px;
+    font-weight:700;font-size:14px;cursor:pointer;
+    transition:background 0.15s;
+  }
+  button.primary:hover{background:#7d1631;}
+  button.primary:disabled{background:#ccc;cursor:not-allowed;}
+  #auth-error{color:var(--plu-maroon);font-size:12px;margin-top:10px;display:none;}
+
+  /* CHAT LAYOUT */
+  #feed-screen{
+    display:none;
+    flex-direction:column;
+    height:calc(100vh - 65px); /* below header */
+  }
+
+  #posts-list{
+    flex:1;
+    overflow-y:auto;
+    padding:16px 12px;
+    background:var(--chat-bg);
+    background-image:
+      radial-gradient(circle at 20px 20px, rgba(0,0,0,0.02) 2px, transparent 2px);
+    background-size:36px 36px;
+  }
+
+  .bubble-row{display:flex;margin-bottom:10px;}
+  .bubble-row.mine{justify-content:flex-end;}
+
+  .bubble{
+    max-width:78%;
+    background:white;
+    border-radius:12px;
+    padding:8px 10px 6px;
+    box-shadow:0 1px 2px rgba(0,0,0,0.12);
+    position:relative;
+  }
+  .bubble-row.mine .bubble{background:#FFF3B0;}
+  .bubble.pinned{border-left:4px solid var(--plu-maroon);}
+
+  .bubble .name{
+    font-size:12.5px;font-weight:700;color:var(--plu-maroon);margin-bottom:2px;
+  }
+  .bubble.pinned .name::before{content:"📌 ";}
+  .bubble-row.mine .bubble .name{color:var(--plu-olive);}
+
+  .bubble .content{font-size:14px;line-height:1.4;white-space:pre-wrap;color:var(--plu-black);}
+  .bubble .content img{max-width:100%;border-radius:8px;display:block;margin-top:4px;}
+  .bubble .content audio{width:220px;max-width:100%;margin-top:4px;}
+
+  .bubble .meta-row{
+    display:flex;align-items:center;gap:10px;margin-top:4px;justify-content:flex-end;
+  }
+  .bubble .time{font-size:10.5px;color:var(--plu-gray);}
+  .bubble .bubble-actions{display:flex;gap:8px;}
+  .bubble .bubble-actions button{
+    background:none;border:none;font-size:11px;color:var(--plu-gray);cursor:pointer;
+    display:flex;align-items:center;gap:2px;font-weight:600;
+  }
+  .bubble .bubble-actions button.liked{color:var(--plu-maroon);}
+
+  .avatar-sm{
+    width:28px;height:28px;border-radius:50%;background:var(--plu-olive);
+    color:white;display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:11px;flex-shrink:0;margin-right:6px;align-self:flex-end;
+  }
+  .bubble-row.mine .avatar-sm{display:none;}
+  .bubble-wrap{display:flex;align-items:flex-end;max-width:78%;}
+  .bubble-row.mine .bubble-wrap{max-width:100%;}
+
+  .empty-state{text-align:center;color:var(--plu-gray);padding:40px 20px;font-size:14px;}
+
+  /* COMPOSER — pinned to bottom like WhatsApp */
+  .composer{
+    flex-shrink:0;
+    background:#F0EEE5;
+    padding:8px 10px;
+    display:flex;
+    align-items:flex-end;
+    gap:8px;
+    border-top:1px solid #ddd;
+  }
+  .composer .icon-btn{
+    background:none;border:none;font-size:20px;cursor:pointer;padding:6px;
+    flex-shrink:0;line-height:1;
+  }
+  .composer .input-wrap{
+    flex:1;
+    background:white;
+    border-radius:22px;
+    padding:9px 14px;
+    display:flex;
+    align-items:center;
+  }
+  .composer textarea{
+    flex:1;border:none;resize:none;font-family:'Inter',sans-serif;
+    font-size:14px;max-height:90px;outline:none;line-height:1.3;
+  }
+  .send-btn{
+    width:40px;height:40px;border-radius:50%;background:var(--plu-black);color:var(--plu-yellow);
+    border:none;font-size:16px;cursor:pointer;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .send-btn:disabled{opacity:0.4;cursor:not-allowed;}
+  .attach-preview{
+    font-size:11px;color:var(--plu-maroon);padding:2px 12px;background:#F0EEE5;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-mark">PLU</div>
+  <div>
+    <h1>PLU ARMY</h1>
+    <span class="tag">Patriotic League of Uganda</span>
+  </div>
+</header>
+
+<!-- AUTH SCREEN -->
+<div id="auth-screen">
+  <div class="card">
+    <h2>Join PLU ARMY</h2>
+    <p class="sub">Enter your details to join the group. Your name will be shown on your posts.</p>
+    <label>Full name</label>
+    <input id="reg-name" type="text" placeholder="e.g. Okello James">
+    <label>Phone number</label>
+    <input id="reg-phone" type="tel" placeholder="e.g. 0772000000">
+    <label>Location</label>
+    <input id="reg-location" type="text" placeholder="e.g. Kampala">
+    <button class="primary" id="join-btn" onclick="registerUser()">Join the group</button>
+    <p id="auth-error"></p>
+  </div>
+</div>
+
+<!-- FEED SCREEN (chat layout) -->
+<div id="feed-screen">
+  <div id="posts-list"></div>
+  <div id="attach-preview" class="attach-preview" style="display:none;"></div>
+  <div class="composer">
+    <label class="icon-btn" title="Photo">📷
+      <input type="file" id="image-input" accept="image/*" style="display:none" onchange="previewMedia('image')">
+    </label>
+    <label class="icon-btn" title="Audio">🎙️
+      <input type="file" id="audio-input" accept="audio/*" style="display:none" onchange="previewMedia('audio')">
+    </label>
+    <div class="input-wrap">
+      <textarea id="post-text" placeholder="Message" rows="1" oninput="autoGrow(this)"></textarea>
+    </div>
+    <button class="send-btn" id="submit-post" onclick="submitPost()">➤</button>
+  </div>
+</div>
+
+<script>
+// ====== CONFIG ======
+const SUPABASE_URL = "https://jrocnhulratyfwcjlrtq.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_9mfzGWil4ryMSxBKeuLKYQ_42ctbBRd";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let currentUser = null;
+let pendingMedia = null; // {type: 'image'|'audio', file: File}
+
+// ====== AUTH ======
+async function registerUser(){
+  const name = document.getElementById('reg-name').value.trim();
+  const phone = document.getElementById('reg-phone').value.trim();
+  const location = document.getElementById('reg-location').value.trim();
+  const errEl = document.getElementById('auth-error');
+  errEl.style.display = 'none';
+
+  if(!name || !phone){
+    errEl.textContent = "Please enter your name and phone number.";
+    errEl.style.display = 'block';
+    return;
+  }
+
+  document.getElementById('join-btn').disabled = true;
+  document.getElementById('join-btn').textContent = "Joining...";
+
+  const { data: existing } = await sb.from('users').select('*').eq('phone', phone).maybeSingle();
+
+  if(existing){
+    if(!existing.is_active){
+      errEl.textContent = "This account has been deactivated. Contact an admin.";
+      errEl.style.display = 'block';
+      document.getElementById('join-btn').disabled = false;
+      document.getElementById('join-btn').textContent = "Join the group";
+      return;
+    }
+    currentUser = existing;
+  } else {
+    const { data: newUser, error } = await sb.from('users').insert({name, phone, location}).select().single();
+    if(error){
+      errEl.textContent = "Something went wrong. Please try again.";
+      errEl.style.display = 'block';
+      document.getElementById('join-btn').disabled = false;
+      document.getElementById('join-btn').textContent = "Join the group";
+      return;
+    }
+    currentUser = newUser;
+  }
+
+  localStorage.setItem('plu_army_user_id', currentUser.id);
+  enterFeed();
+}
+
+async function tryAutoLogin(){
+  const savedId = localStorage.getItem('plu_army_user_id');
+  if(!savedId) return;
+  const { data } = await sb.from('users').select('*').eq('id', savedId).maybeSingle();
+  if(data && data.is_active){
+    currentUser = data;
+    enterFeed();
+  }
+}
+
+function enterFeed(){
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('feed-screen').style.display = 'flex';
+  loadPosts();
+}
+
+// ====== MEDIA ======
+function previewMedia(type){
+  const input = document.getElementById(type + '-input');
+  const preview = document.getElementById('attach-preview');
+  if(input.files[0]){
+    pendingMedia = {type, file: input.files[0]};
+    preview.style.display = 'block';
+    preview.textContent = `${type === 'image' ? '📷 Photo' : '🎙️ Audio'} attached — type a caption (optional) and hit send.`;
+  }
+}
+
+function autoGrow(el){
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 90) + 'px';
+}
+
+// ====== POSTS ======
+async function submitPost(){
+  const textEl = document.getElementById('post-text');
+  const text = textEl.value.trim();
+  if(!text && !pendingMedia){ return; }
+
+  document.getElementById('submit-post').disabled = true;
+
+  let type = 'text';
+  let content = text;
+
+  if(pendingMedia){
+    type = pendingMedia.type;
+    const file = pendingMedia.file;
+    const path = `${currentUser.id}/${Date.now()}_${file.name}`;
+    const { error: uploadErr } = await sb.storage.from('post-media').upload(path, file);
+    if(uploadErr){
+      alert("Upload failed: " + uploadErr.message);
+      document.getElementById('submit-post').disabled = false;
+      return;
+    }
+    const { data: urlData } = sb.storage.from('post-media').getPublicUrl(path);
+    content = JSON.stringify({url: urlData.publicUrl, caption: text});
+  }
+
+  const { error } = await sb.from('posts').insert({user_id: currentUser.id, type, content});
+  document.getElementById('submit-post').disabled = false;
+
+  if(error){ alert("Couldn't post: " + error.message); return; }
+
+  textEl.value = '';
+  textEl.style.height = 'auto';
+  pendingMedia = null;
+  document.getElementById('attach-preview').style.display = 'none';
+  document.getElementById('image-input').value = '';
+  document.getElementById('audio-input').value = '';
+  loadPosts();
+}
+
+async function loadPosts(){
+  const { data: posts, error } = await sb
+    .from('posts')
+    .select('*, users(name), likes(user_id)')
+    .eq('is_deleted', false)
+    .order('is_pinned', {ascending:false})
+    .order('created_at', {ascending:true});
+
+  const list = document.getElementById('posts-list');
+  if(error){ list.innerHTML = `<div class="empty-state">Couldn't load the feed. Refresh to try again.</div>`; return; }
+  if(!posts.length){ list.innerHTML = `<div class="empty-state">No messages yet. Be the first to share something.</div>`; return; }
+
+  list.innerHTML = posts.map(p => renderPost(p)).join('');
+  list.scrollTop = list.scrollHeight;
+}
+
+function renderPost(p){
+  const name = p.users?.name || 'Unknown';
+  const initials = name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+  const time = new Date(p.created_at).toLocaleString('en-GB', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'});
+  const likedByMe = (p.likes || []).some(l => l.user_id === currentUser.id);
+  const likeCount = (p.likes || []).length;
+  const isMine = p.user_id === currentUser.id;
+
+  let body = '';
+  if(p.type === 'text'){
+    body = escapeHtml(p.content);
+  } else {
+    const parsed = JSON.parse(p.content);
+    if(p.type === 'image'){
+      body = (parsed.caption ? `<div style="margin-bottom:4px;">${escapeHtml(parsed.caption)}</div>` : '') +
+             `<img src="${parsed.url}" alt="posted image">`;
+    } else if(p.type === 'audio'){
+      body = (parsed.caption ? `<div style="margin-bottom:4px;">${escapeHtml(parsed.caption)}</div>` : '') +
+             `<audio controls src="${parsed.url}"></audio>`;
+    }
+  }
+
+  return `
+  <div class="bubble-row ${isMine ? 'mine' : ''}">
+    <div class="bubble-wrap">
+      ${!isMine ? `<div class="avatar-sm">${initials}</div>` : ''}
+      <div class="bubble ${p.is_pinned ? 'pinned' : ''}">
+        ${!isMine ? `<div class="name">${escapeHtml(name)}</div>` : ''}
+        <div class="content">${body}</div>
+        <div class="meta-row">
+          <div class="bubble-actions">
+            <button class="${likedByMe ? 'liked' : ''}" onclick="toggleLike('${p.id}', ${likedByMe})">${likedByMe ? '❤️' : '🤍'} ${likeCount}</button>
+            <button onclick="reportPost('${p.id}')">🚩</button>
+          </div>
+          <span class="time">${time}</span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function toggleLike(postId, currentlyLiked){
+  if(currentlyLiked){
+    await sb.from('likes').delete().eq('post_id', postId).eq('user_id', currentUser.id);
+  } else {
+    await sb.from('likes').insert({post_id: postId, user_id: currentUser.id});
+  }
+  loadPosts();
+}
+
+async function reportPost(postId){
+  const reason = prompt("Why are you reporting this post? (optional)");
+  await sb.from('reports').insert({post_id: postId, reported_by: currentUser.id, reason: reason || null});
+  alert("Reported. An admin will review this post.");
+}
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ====== INIT ======
+tryAutoLogin();
+</script>
+</body>
+</html>
