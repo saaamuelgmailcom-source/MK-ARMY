@@ -161,6 +161,29 @@ before update on posts
 for each row execute function public.guard_post_fields();
 
 -- ============================
+-- 4b. HELPER: "is the currently logged-in person still an active account?"
+-- ============================
+-- The app's own screen already tells a deactivated person they're
+-- deactivated and logs them out — but that's just a message in the
+-- browser. Without this check, their login session stays technically
+-- valid until that happens, so anything they try to post in that gap
+-- (or from a request that skips the app's own check entirely) would
+-- otherwise still go through. This makes deactivation a real,
+-- database-level lock, not just something the app's screen shows.
+create or replace function public.is_active_user()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select coalesce(
+    (select is_active from users where id = auth.uid()),
+    false
+  );
+$$;
+
+-- ============================
 -- 5. ROW LEVEL SECURITY
 -- ============================
 
@@ -195,12 +218,12 @@ create policy "visible posts are readable by everyone" on posts
   );
 
 create policy "you can only post as yourself" on posts
-  for insert with check (auth.uid() = user_id);
+  for insert with check (auth.uid() = user_id and public.is_active_user());
 
 create policy "you or an admin can update a post" on posts
   for update
-  using (auth.uid() = user_id or public.is_admin())
-  with check (auth.uid() = user_id or public.is_admin());
+  using ((auth.uid() = user_id and public.is_active_user()) or public.is_admin())
+  with check ((auth.uid() = user_id and public.is_active_user()) or public.is_admin());
 
 -- REPLIES (legacy table, kept for compatibility — the app
 -- currently threads replies via posts.reply_to instead)
@@ -208,14 +231,14 @@ create policy "anyone can read replies" on replies
   for select using (true);
 
 create policy "you can only reply as yourself" on replies
-  for insert with check (auth.uid() = user_id);
+  for insert with check (auth.uid() = user_id and public.is_active_user());
 
 -- LIKES
 create policy "anyone can read likes" on likes
   for select using (true);
 
 create policy "you can only like as yourself" on likes
-  for insert with check (auth.uid() = user_id);
+  for insert with check (auth.uid() = user_id and public.is_active_user());
 
 create policy "you can only remove your own like" on likes
   for delete using (auth.uid() = user_id);
@@ -227,7 +250,7 @@ create policy "only admins can read reports" on reports
   for select using (public.is_admin());
 
 create policy "you can only file a report as yourself" on reports
-  for insert with check (auth.uid() = reported_by);
+  for insert with check (auth.uid() = reported_by and public.is_active_user());
 
 create policy "only admins can update reports" on reports
   for update using (public.is_admin());
