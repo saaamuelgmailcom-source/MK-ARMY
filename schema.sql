@@ -1,30 +1,46 @@
 -- ============================================================
--- PLU ARMY — Schema v2: real auth, locked-down RLS
+-- PLU ARMY — Schema (single file, always current)
 -- Run in Supabase: SQL Editor -> New Query -> paste all -> Run
 --
+-- This is the ONLY schema file for this project. Whenever
+-- something needs to change, this file gets updated in place —
+-- there are no separate patch files to track or re-apply.
+--
 -- This REPLACES the old schema entirely. It drops the existing
--- tables and all their data (messages, photos, accounts) and
--- rebuilds everything on top of Supabase's own login system
--- instead of the old "anyone can write anything" setup.
+-- tables and all their data (messages, photos, accounts) AND every
+-- Supabase Auth login, and rebuilds everything from a clean slate.
+-- Running this file always means everyone re-registers from scratch
+-- afterward — including you.
 --
 -- BEFORE running this, also do the one-time dashboard steps in
--- SUPABASE_AUTH_SETUP.md — this SQL alone is not enough, phone
--- login won't work until that's done too.
+-- SUPABASE_AUTH_SETUP.md — this SQL alone is not enough, login
+-- won't work until that's done too.
 -- ============================================================
 
 -- ============================
 -- 0. CLEAN SLATE
 -- ============================
--- Wipes all existing app data and policies. Does NOT touch
--- auth.users (Supabase's own login table) — if you ever ran the
--- old schema and had test accounts, delete those separately from
--- Authentication -> Users in the dashboard.
+-- Wipes ALL existing app data AND logins — messages, photos,
+-- accounts, and the Supabase Auth logins behind them. Every time
+-- this file is run, you start completely fresh: nobody can be left
+-- with a login that has no matching profile (the "Account found,
+-- but no profile on file" error), because logins and profiles are
+-- always wiped together, in the same run.
+--
+-- This means: after running this file, EVERYONE — including you —
+-- has to register again from scratch through index.html. There is
+-- no way to preserve old accounts across a run of this file.
 
 drop table if exists reports cascade;
 drop table if exists likes cascade;
 drop table if exists replies cascade;
 drop table if exists posts cascade;
 drop table if exists users cascade;
+
+-- Deletes every login Supabase Auth knows about (cascades to their
+-- sessions/identities automatically). Safe even on a brand new
+-- project where this is already empty.
+delete from auth.users;
 
 -- ============================
 -- 1. TABLES
@@ -92,11 +108,12 @@ create index idx_likes_post_id on likes(post_id);
 create index idx_reports_status on reports(status);
 
 -- ============================
--- 3. HELPER: "is the currently logged-in person an admin?"
+-- 3. HELPERS: "is the currently logged-in person an admin / active?"
 -- ============================
--- Used throughout the policies below instead of repeating the
--- same subquery everywhere. security definer + a fixed search_path
--- so it reliably reads the users table regardless of who calls it.
+-- Used throughout the policies below instead of repeating the same
+-- subquery everywhere. security definer + a fixed search_path so
+-- they reliably read the users table regardless of who calls them.
+
 create or replace function public.is_admin()
 returns boolean
 language sql
@@ -106,6 +123,23 @@ stable
 as $$
   select coalesce(
     (select is_admin from users where id = auth.uid()),
+    false
+  );
+$$;
+
+-- Deactivation is a real, database-level lock, not just something
+-- the app's screen shows — every insert/update policy below (and
+-- every read policy) checks this, so a deactivated account can
+-- neither write anything nor read anything once it takes effect.
+create or replace function public.is_active_user()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select coalesce(
+    (select is_active from users where id = auth.uid()),
     false
   );
 $$;
@@ -120,7 +154,9 @@ $$;
 -- to change that field, no matter what the request body says.
 
 -- Nobody can flip their own is_admin/is_active — only an admin
--- editing someone ELSE's row can do that.
+-- editing someone ELSE's row can do that. (admin.html also warns
+-- before even trying, so this never has to silently no-op there —
+-- but the trigger is the real, non-bypassable enforcement.)
 create or replace function public.guard_user_fields()
 returns trigger
 language plpgsql
@@ -161,29 +197,6 @@ before update on posts
 for each row execute function public.guard_post_fields();
 
 -- ============================
--- 4b. HELPER: "is the currently logged-in person still an active account?"
--- ============================
--- The app's own screen already tells a deactivated person they're
--- deactivated and logs them out — but that's just a message in the
--- browser. Without this check, their login session stays technically
--- valid until that happens, so anything they try to post in that gap
--- (or from a request that skips the app's own check entirely) would
--- otherwise still go through. This makes deactivation a real,
--- database-level lock, not just something the app's screen shows.
-create or replace function public.is_active_user()
-returns boolean
-language sql
-security definer
-set search_path = public
-stable
-as $$
-  select coalesce(
-    (select is_active from users where id = auth.uid()),
-    false
-  );
-$$;
-
--- ============================
 -- 5. ROW LEVEL SECURITY
 -- ============================
 
@@ -194,12 +207,14 @@ alter table likes enable row level security;
 alter table reports enable row level security;
 
 -- USERS
--- Everyone can see basic profile info (names/avatars need to show
--- in the chat) — but only you can create your own row, and only
--- you (or an admin) can update it. The trigger above stops even
--- you from touching is_admin/is_active on yourself.
-create policy "anyone can read profiles" on users
-  for select using (true);
+-- A deactivated person can still read their OWN row (needed so the
+-- app can see is_active = false and sign them out) but nobody else's.
+-- Active members and admins can read everyone's basic profile info
+-- (names/avatars need to show in the chat).
+create policy "active users can read profiles" on users
+  for select using (
+    auth.uid() = id or public.is_active_user() or public.is_admin()
+  );
 
 create policy "you can create only your own profile" on users
   for insert with check (auth.uid() = id);
@@ -210,11 +225,13 @@ create policy "you or an admin can update a profile" on users
   with check (auth.uid() = id or public.is_admin());
 
 -- POSTS
--- Deleted posts are hidden from everyone except the author and
--- admins — enforced here, not just by the app hiding them visually.
+-- Must be active (or admin) to read anything at all. Active users
+-- see all non-deleted posts, plus their own deleted ones; admins
+-- see everything regardless. Deactivated non-admins see nothing.
 create policy "visible posts are readable by everyone" on posts
   for select using (
-    is_deleted = false or auth.uid() = user_id or public.is_admin()
+    ((is_deleted = false or auth.uid() = user_id) and public.is_active_user())
+    or public.is_admin()
   );
 
 create policy "you can only post as yourself" on posts
@@ -227,15 +244,15 @@ create policy "you or an admin can update a post" on posts
 
 -- REPLIES (legacy table, kept for compatibility — the app
 -- currently threads replies via posts.reply_to instead)
-create policy "anyone can read replies" on replies
-  for select using (true);
+create policy "active users can read replies" on replies
+  for select using (public.is_active_user() or public.is_admin());
 
 create policy "you can only reply as yourself" on replies
   for insert with check (auth.uid() = user_id and public.is_active_user());
 
 -- LIKES
-create policy "anyone can read likes" on likes
-  for select using (true);
+create policy "active users can read likes" on likes
+  for select using (public.is_active_user() or public.is_admin());
 
 create policy "you can only like as yourself" on likes
   for insert with check (auth.uid() = user_id and public.is_active_user());
@@ -256,8 +273,17 @@ create policy "only admins can update reports" on reports
   for update using (public.is_admin());
 
 -- ============================
--- 6. STORAGE POLICIES (post-media bucket)
+-- 6. STORAGE (post-media bucket)
 -- ============================
+-- Creates the bucket itself, not just its policies — on a brand
+-- new project there is no manual "create a bucket in the
+-- dashboard" step to remember; this file is enough on its own.
+-- public: true means uploaded files are reachable by their URL
+-- without a signed link, matching "anyone can view media" below.
+
+insert into storage.buckets (id, name, public)
+values ('post-media', 'post-media', true)
+on conflict (id) do nothing;
 
 drop policy if exists "public can upload media" on storage.objects;
 drop policy if exists "public can read media" on storage.objects;
@@ -275,9 +301,14 @@ using (bucket_id = 'post-media');
 -- ============================
 -- 7. REALTIME
 -- ============================
+-- 'users' is included so the app's live "you've been deactivated"
+-- listener (setupSelfStatusMonitor in index.html) actually receives
+-- the update the instant an admin deactivates someone, instead of
+-- listening to a stream that was never switched on.
 
 alter publication supabase_realtime add table posts;
 alter publication supabase_realtime add table likes;
+alter publication supabase_realtime add table users;
 
 -- ============================
 -- 8. AUTO-CLEANUP (90-day message expiry)
@@ -339,7 +370,11 @@ select cron.schedule(
 -- ============================
 -- Do this AFTER completing SUPABASE_AUTH_SETUP.md and after you've
 -- registered your own account through the app once (as a normal
--- member). Then come back here, put in the same phone number you
--- registered with, and run this to promote that account to admin:
+-- member, name: Byereta Samuel, phone: 0779477048).
 --
--- update users set is_admin = true where phone = '256700000000';
+-- IMPORTANT: run ONLY the single line below by itself in SQL
+-- Editor at that point — do NOT re-run this whole file again to
+-- reach it, since section 0 would wipe the registration you just
+-- did (and everyone else's) right back out.
+
+update users set is_admin = true where phone = '256779477048';
